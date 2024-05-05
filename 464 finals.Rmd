@@ -1,0 +1,335 @@
+---
+title: "ECON 464: Parental Education and Gender Differences in Career Choices: An Analysis of Legal Professions among US College Graduate"
+output:
+  html_document: default
+  pdf_document: default
+date: "2024-05-06"
+author: Chi Vu, Dilnoza Khuseynova
+---
+
+The research aims to answer the question of whether the education background of an individual’s parents influence the choice of career path, especially in law?
+
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(tidyr)
+library(stargazer)
+library(httr) # Import from web
+
+```
+
+```{r}
+#load full NSCG 2021 dataset
+# Data: NSCG
+url <- "https://wadelitt.com/wp-content/uploads/2024/02/nscg21.csv"
+response <- httr::GET(url, timeout(300))  # Sets timeout to 300 seconds
+
+if (status_code(response) == 200) {
+  # Read directly from the content of the response
+  data_content <- content(response, "text")
+  df_nscg21 <- read.csv(text = data_content)
+} else {
+  print("Failed to download the file")
+}
+
+nscg21 <- df_nscg21
+
+# Clean Data --------------------------------------------------------------
+
+# baind   | Indicator of whether respondent received BA degree
+# baind = "N" | Did not receive BA (n=997)
+nscg21 <- nscg21 %>% filter(baind != "N")
+
+# lwnvr   | Never Worked
+# lwnvr = "Y"  | (n=908)
+# Respondent checked box "Never worked for pay or profit" 
+nscg21 <- nscg21 %>% filter(lwnvr != "Y")
+
+#filter for lawyers and judges
+df_law <- nscg21 %>% filter(n3ocpr == "781200" | n3oclst == "781200" ) # creating main dataframe, with lawyers and judges professionals
+```
+
+1480 out of 104392 participants are or have been lawyers and judges.
+
+## Data Exploration - df_law
+
+```{r degree distribution}
+summary(df_law$dgrdg)
+
+# Convert education level columns to factors with appropriate labels
+df_law$dgrdg <- factor(df_law$dgrdg,
+                       levels = 1:8,
+                       labels = c("Less than high school",
+                                  "High school diploma",
+                                  "Some college/vocational",
+                                  "Bachelor's degree",
+                                  "Master's degree",
+                                  "Professional degree",
+                                  "Doctorate",
+                                  "Not applicable"))
+
+
+# Create a bar chart to show the distribution of highest degree types
+ggplot(df_law, aes(x = dgrdg, fill = dgrdg)) +
+  geom_bar(color = "black") +
+  scale_fill_brewer(palette = "Set3", name = "Degree") +
+  labs(title = "Distribution of Highest Degree Types Among Lawyers and Judges",
+       x = "Highest Degree Obtained", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r age distribution}
+
+summary(df_law$age)
+
+ggplot(df_law, aes(x = agegr, fill = gender)) +
+  geom_bar(position = position_dodge(width = 2.5), stat = "count", color = "black") +
+  scale_fill_manual(values = c("M" = "lightblue", "F" = "salmon")) +
+  labs(title = "Age Distribution of Lawyers and Judges by Gender", x = "Age Group", y = "Frequency") +
+  scale_x_discrete(limits = df_law$agegr, labels = function(x) paste0(x, "-", x+4)) +
+  theme_minimal()
+
+
+```
+
+```{r gender proportion}
+# Calculate percentages for each gender
+df_law_percent <- df_law %>%
+  count(gender) %>%
+  mutate(percentage = n / sum(n) * 100)
+
+# Create pie chart with percentages
+ggplot(df_law_percent, aes(x = "", y = percentage, fill = factor(gender))) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "Gender Distribution Among Lawyers and Judges", fill = "Gender") +
+  geom_text(aes(label = sprintf("%.1f%%", percentage)), position = position_stack(vjust = 0.5)) +
+  theme_void()
+
+```
+
+```{r parents education}
+# Any value outside this range or NA can be set to 8 ("Not applicable") as a default
+
+df_law$eddad <- ifelse(is.na(df_law$eddad) | !df_law$eddad %in% 1:8, 8, df_law$eddad)
+df_law$edmom <- ifelse(is.na(df_law$edmom) | !df_law$edmom %in% 1:8, 8, df_law$edmom)
+
+# Convert education level columns to factors with appropriate labels
+df_law$eddad <- factor(df_law$eddad,
+                       levels = 1:8,
+                       labels = c("Less than high school",
+                                  "High school diploma",
+                                  "Some college/vocational",
+                                  "Bachelor's degree",
+                                  "Master's degree",
+                                  "Professional degree",
+                                  "Doctorate",
+                                  "Not applicable"))
+
+df_law$edmom <- factor(df_law$edmom,
+                       levels = 1:8,
+                       labels = c("Less than high school",
+                                  "High school diploma",
+                                  "Some college/vocational",
+                                  "Bachelor's degree",
+                                  "Master's degree",
+                                  "Professional degree",
+                                  "Doctorate",
+                                  "Not applicable"))
+
+# Reshape data to long format and adjust parent_type
+df_law_long <- df_law %>%
+  pivot_longer(
+    cols = c("eddad", "edmom"),
+    names_to = "parent_type",
+    values_to = "education_level"
+  ) %>%
+  mutate(parent_type = recode(parent_type, 
+                              "eddad" = "Father", 
+                              "edmom" = "Mother"))
+
+
+# Create a side by side bar chart
+ggplot(df_law_long, aes(x = education_level, fill = parent_type)) +
+  geom_bar(position = position_dodge(width = 0.9), color = "black") +
+  scale_fill_manual(values = c("Father" = "skyblue", "Mother" = "salmon"), name = "Parent") +
+  labs(title = ("Parents' Education Level Distribution Among Lawyers and Judges"),
+       x = "Education Level", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+
+## Logistic Regression
+```{r, include=FALSE}
+# Specify a CRAN mirror
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# Load the necessary package
+install.packages("glm2")
+library(MASS)  # For logistic regression
+library(car)   # For VIF function - multicolinearity check
+```
+
+
+```{r Convert necessary categorical variables to factors, include=FALSE}
+# Creating binary variable: 1 if lawyer/judge, 0 otherwise 
+nscg21$lawyer <- ifelse(nscg21$n3ocpr == "781200" | nscg21$n3oclst == "781200", 1, 0)
+
+# Convert necessary categorical variables to factors
+nscg21 <- nscg21 %>%
+  mutate(
+     eddad = factor(eddad, levels = 1:8,
+                           labels = c("Less than high school",
+                                  "High school diploma",
+                                  "Some college/vocational",
+                                  "Bachelor's degree",
+                                  "Master's degree",
+                                  "Professional degree",
+                                  "Doctorate",
+                                  "Not applicable")),
+    edmom = factor(edmom,  levels = 1:8,
+                           labels = c("Less than high school",
+                                  "High school diploma",
+                                  "Some college/vocational",
+                                  "Bachelor's degree",
+                                  "Master's degree",
+                                  "Professional degree",
+                                  "Doctorate",
+                                  "Not applicable")),
+    gender = factor(gender),
+    spowk = factor(spowk, levels = c(1, 2, 3, "L"), 
+                   labels = c("Yes, full-time",
+                                     "Yes, part-time",
+                                     "No",
+                                     "Skip")),
+    racethm = factor(racethm, levels = 1:7,
+                     labels = c("Asian", 
+                                "American Indian/Alaska Native", 
+                                "Black", 
+                                "Hispanic", 
+                                "White", 
+                                "Native Hawaiian/Other Pacific Islander", 
+                                "Multiple Race"))
+         )
+```
+
+```{r logit with all possible variables}
+# Fit the basic logistic regression model with all possible variables
+logit_mod1 <- glm(lawyer ~ eddad + edmom + gender + spowk + chun12 + racethm + age + bthus + facadv + facben + facchal + facind + facloc + facresp + facsal + facsec + facsoc, 
+              data = nscg21, 
+              family = binomial(link = "logit"))
+
+# Summary of the model
+summary(logit_mod1)
+
+```
+
+Coefficient Significance:
+
+- Parental Education (`eddad`, `edmom`): Both coefficients are statistically significant, suggesting a positive association between higher parental education levels and the likelihood of becoming a lawyer. This aligns with our hypothesis that emphasize the role of parental education in career outcomes.
+
+- Demographic Factors (`gender`, `racethm`, `bthus`): Gender is not significant, indicating it does not distinguish between lawyers and non-lawyers in the dataset. 
+-> Gender is variable of focus, making it a control variable
+
+- The significant effect of being born in the U.S. (`bthusY`) and certain racial categories (e.g., Hispanic) may highlight demographic influences.
+
+- Age: Age is significant, implying that career decisions to become a lawyer may correlate with age, possibly reflecting career development stages or generational effects.
+Job Factors:
+
+- Several job satisfaction factors (`facadv`, `facsal`, etc.) were included, but many show non-significance or lead to singularities. We are focusing on variables with siginificance in the refined model: `facben`, `facresp`, and `facsoc`.
+
+Refining the model:
+
+```{r converting facxxx variables, include=FALSE}
+nscg21$facben <- factor(nscg21$facben, levels = c(1, 2, 3, 4, "L"), labels = c("Very important",
+                                                                                "Somewhat important",
+                                                                                "Somewhat unimportant",
+                                                                                "Not important at all",
+                                                                                "Logical Skip"))
+
+nscg21$facresp <- factor(nscg21$facresp, levels = c(1, 2, 3, 4, "L"), labels = c("Very important",
+                                                                                "Somewhat important",
+                                                                                "Somewhat unimportant",
+                                                                                "Not important at all",
+                                                                                "Logical Skip"))
+
+nscg21$facsoc <- factor(nscg21$facsoc, levels = c(1, 2, 3, 4, "L"), labels = c("Very important",
+                                                                                "Somewhat important",
+                                                                                "Somewhat unimportant",
+                                                                                "Not important at all",
+                                                                                "Logical Skip"))
+```
+
+```{r refined logit model}
+# refined model
+logit_mod2 <- glm(lawyer ~ eddad + edmom + gender + age + racethm + bthus + facben + facresp + facsoc,
+                  family = binomial(link = "logit"),
+                  data = nscg21)
+summary(logit_mod2)
+```
+
+This model refinement from the more complex initial model has simplified the predictors while maintaining significant insights into what influences the probability of becoming a lawyer.
+
+- Higher educational levels of parents, particularly a professional degree, significantly increase the likelihood of the child being a lawyer. 
+
+- Age and being U.S. born also significantly influence the likelihood, with age increasing the odds and U.S. born status showing a strong positive effect. 
+
+- Some workplace factors such as the importance of benefits and social aspects are significant predictors, whereas the importance of responsibility shows a negative effect. 
+
+
+
+```{r}
+# Check for multicolinearity
+vif_vals <- vif(logit_mod2)
+print(vif_vals)
+```
+
+
+Looking at the VIF values, none of the variables exceed the common thresholds of concern for multicollinearity (typically 5 or 10 for VIF, ). However, the variables `eddad` and `edmom` have slightly higher VIF values than others (around 2.8-2.9), although these aren't typically alarming levels for logistic regression.
+
+
+```{r male logit, include=FALSE}
+# Filter data for males
+data_male <- subset(nscg21, gender == "M")
+logit_male <- glm(lawyer ~ eddad + edmom + age + racethm + bthus + facben +  facresp + facsoc,
+                  family = binomial(link = "logit"),
+                  data = data_male)
+summary(logit_male)
+```
+
+```{r female logit, include=FALSE}
+# Filter data for females
+data_female <- subset(nscg21, gender == "F")
+logit_female <- glm(lawyer ~ eddad + edmom + age + racethm + bthus + facben +  facresp + facsoc,
+                    family = binomial(link = "logit"),
+                    data = data_female)
+summary(logit_female)
+```
+
+
+### Model Comparisons
+
+Detailed report in submitted paper.
+
+```{r table: gender comparison}
+# Create a comparison table - gender
+stargazer(logit_male, logit_female, 
+          title = "Comparison of Logistic Regression Models between Gender",
+          type = "text",  # Change to "html" or "latex" for different output formats
+          model.names = TRUE,  # Include names of models
+          out = "gender_comparison_table.html")  # Saves output to an HTML file, remove for console output
+
+```
+
+```{r overall vs gender}
+# Comparing full sample with genders
+stargazer(logit_mod2, logit_male, logit_female, 
+          type="text",
+           title = "Comparison of Logistic Regression Models between Gender")
+```
+
