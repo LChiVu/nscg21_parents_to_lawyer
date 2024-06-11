@@ -13,7 +13,8 @@ This project explores how parental education shapes career paths, specifically f
 - Packages: tidyverse, glmnet, stargazer
 
 **Data**
-The dataset used in this project comprises responses from the NSCG survey, focusing on individuals who have pursued careers in law. The dataset includes information on parental education levels, gender, age, race/ethnicity, and job preferences, among other variables.
+
+The dataset used in this project comprises responses from the [2021 NSCG](https://ncses.nsf.gov/explore-data/microdata/national-survey-college-graduates) survey, focusing on individuals who have pursued careers in law. The dataset includes information on parental education levels, gender, age, race/ethnicity, and job preferences, among other variables.
 
 **Analysis Process**
 1. **Exploratory Data Analysis (EDA):** Descriptive statistics and visualizations are employed to understand the distribution of relevant variables among lawyers and judges.
